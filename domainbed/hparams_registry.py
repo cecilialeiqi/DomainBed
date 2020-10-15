@@ -7,7 +7,7 @@ def _hparams(algorithm, dataset, random_state):
     Global registry of hyperparams. Each entry is a (default, random) tuple.
     New algorithms / networks / etc. should add entries here.
     """
-    SMALL_IMAGES = ['Debug28', 'RotatedMNIST', 'ColoredMNIST']
+    SMALL_IMAGES = ['Debug28', 'RotatedMNIST', 'ColoredMNIST', 'RotatedCIFAR10']
 
     hparams = {}
     
@@ -25,7 +25,7 @@ def _hparams(algorithm, dataset, random_state):
         if algorithm == "ARM":
             hparams['batch_size'] = (8, 8)
     else:
-        hparams['lr'] = (1e-3, 10**random_state.uniform(-4.5, -2.5))
+        hparams['lr'] = (1e-2, 10**random_state.uniform(-4.5, -2.5))
         hparams['batch_size'] = (64, int(2**random_state.uniform(3, 9)))
 
     if dataset in SMALL_IMAGES:
@@ -38,8 +38,8 @@ def _hparams(algorithm, dataset, random_state):
             hparams['lr_g'] = (5e-5, 10**random_state.uniform(-5, -3.5))
             hparams['lr_d'] = (5e-5, 10**random_state.uniform(-5, -3.5))
         else:
-            hparams['lr_g'] = (1e-3, 10**random_state.uniform(-4.5, -2.5))
-            hparams['lr_d'] = (1e-3, 10**random_state.uniform(-4.5, -2.5))
+            hparams['lr_g'] = (1e-2, 10**random_state.uniform(-4.5, -2.5))
+            hparams['lr_d'] = (1e-2, 10**random_state.uniform(-4.5, -2.5))
 
         if dataset in SMALL_IMAGES:
             hparams['weight_decay_g'] = (0., 0.)

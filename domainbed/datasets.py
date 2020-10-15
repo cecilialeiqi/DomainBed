@@ -6,8 +6,10 @@ from PIL import Image, ImageFile
 from torchvision import transforms
 import torchvision.datasets.folder
 from torch.utils.data import TensorDataset
-from torchvision.datasets import MNIST, ImageFolder
+from torchvision.datasets import MNIST, ImageFolder, CIFAR10
 from torchvision.transforms.functional import rotate
+import numpy as np
+
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -18,6 +20,7 @@ DATASETS = [
     # Small images
     "ColoredMNIST",
     "RotatedMNIST",
+    "RotatedCIFAR10",
     # Big images
     "VLCS",
     "PACS",
@@ -75,16 +78,99 @@ class Debug224(Debug):
     ENVIRONMENTS = ['0', '1', '2']
 
 
+class MultipleEnvironmentCIFAR(MultipleDomainDataset):
+    def __init__(self, root, environments, dataset_transform, input_shape,
+                num_classes):
+        if root is None:
+            raise ValueError('Data directory not specified')
+        N_STEPS=20000
+
+        transform_train = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
+        transform_test = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
+
+
+        original_dataset_tr = CIFAR10(root, train=True, download=True, transform=transform_train)
+        original_dataset_te = CIFAR10(root, train=False, download=True,transform=transform_test)
+        print('original_data_tr:',type(original_dataset_tr.data))
+        train_data = np.load(root+'cifar102_train.npy',allow_pickle=True).item()
+        #train_data['images'] = transform_train(train_data['images'])
+        test_data = np.load(root+'cifar102_test.npy',allow_pickle=True).item()
+        #test_data['images'] = transform_test(test_data['images'])
+
+        original_images = torch.cat((torch.from_numpy(original_dataset_tr.data),
+                                     torch.from_numpy(original_dataset_te.data)))
+        original_labels = torch.cat((torch.from_numpy(np.array(original_dataset_tr.targets)),
+                                     torch.from_numpy(np.array(original_dataset_te.targets))))
+        cifar102_images_tr = torch.from_numpy(train_data['images'])
+        cifar102_images_te = torch.from_numpy(test_data['images'])
+        cifar102_labels_tr = torch.from_numpy(np.array(train_data['labels']))
+        cifar102_labels_te = torch.from_numpy(np.array(test_data['labels']))
+        n_duplic = int(len(original_images)/len(cifar102_images_te))+1
+        cifar102_images_dup = cifar102_images_tr[:]
+        cifar102_labels_dup = cifar102_labels_tr[:]
+        for i in range(n_duplic):
+            cifar102_images_dup = torch.cat((cifar102_images_dup, cifar102_images_tr))
+            cifar102_labels_dup = torch.cat((cifar102_labels_dup, cifar102_labels_tr))
+        #print(len(original_images), len(cifar102_images))    #60000 vs 12000    
+        shuffle = torch.randperm(len(original_images))
+        #print(cifar102_images[0].shape) # 32x32x3, also need to transpose
+        original_images = original_images[shuffle]
+        original_labels = original_labels[shuffle]
+        shuffle2 = torch.randperm(len(cifar102_images_dup))
+        cifar102_images = cifar102_images_dup[shuffle2]
+        cifar102_labels = cifar102_labels_dup[shuffle2]
+
+        self.datasets = []
+
+        '''for i in range(len(environments)):
+            images = original_images#[i::len(environments)]
+            labels = original_labels#[i::len(environments)]
+            self.datasets.append(dataset_transform(images, labels))'''
+        self.datasets.append(dataset_transform(cifar102_images_te, cifar102_labels_te))
+        self.datasets.append(dataset_transform(cifar102_images, cifar102_labels))
+        self.datasets.append(dataset_transform(original_images, original_labels))
+
+        self.input_shape = input_shape
+        self.num_classes = num_classes
+
+
+class RotatedCIFAR10(MultipleEnvironmentCIFAR):
+    ENVIRONMENTS = ['0', '2', '2test']
+
+    def __init__(self, root, test_envs, hparams):
+        super(RotatedCIFAR10, self).__init__(root, ['0', '2', '2test'],
+                                           self.rotate_dataset, (3, 32, 32), 10)
+
+    def rotate_dataset(self, images, labels):
+        x = torch.zeros(len(images), 3, 32, 32)
+        for i in range(len(images)):
+            x[i] = torch.transpose(torch.transpose(images[i], 0,2),1,2) #rotation(images[i])
+        # transpose 32,32,3 to 3,32,32
+        y = labels.view(-1)
+
+        return TensorDataset(x, y)
+
+
+
+
 class MultipleEnvironmentMNIST(MultipleDomainDataset):
     def __init__(self, root, environments, dataset_transform, input_shape,
                  num_classes):
         super().__init__()
         if root is None:
             raise ValueError('Data directory not specified!')
-
+        print("root is:",root)
         original_dataset_tr = MNIST(root, train=True, download=True)
         original_dataset_te = MNIST(root, train=False, download=True)
-
+        print('original_data_tr:',type(original_dataset_tr.data))
         original_images = torch.cat((original_dataset_tr.data,
                                      original_dataset_te.data))
 
@@ -102,10 +188,10 @@ class MultipleEnvironmentMNIST(MultipleDomainDataset):
             images = original_images[i::len(environments)]
             labels = original_labels[i::len(environments)]
             self.datasets.append(dataset_transform(images, labels, environments[i]))
+        #instead of dataset_transform, need to get data from cifar10.2
 
         self.input_shape = input_shape
         self.num_classes = num_classes
-
 
 class ColoredMNIST(MultipleEnvironmentMNIST):
     ENVIRONMENTS = ['+90%', '+80%', '-90%']

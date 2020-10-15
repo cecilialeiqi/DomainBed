@@ -72,6 +72,14 @@ class ERM(Algorithm):
             lr=self.hparams["lr"],
             weight_decay=self.hparams['weight_decay']
         )
+    
+    def update_hparams(self, hparams):
+         self.optimizer = torch.optim.Adam(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+    
 
     def update(self, minibatches):
         all_x = torch.cat([x for x,y in minibatches])
@@ -85,7 +93,7 @@ class ERM(Algorithm):
         return {'loss': loss.item()}
 
     def predict(self, x):
-        return self.network(x)
+        return self.network(x)  # network output, but no comparison to label
 
 
 class ARM(ERM):
@@ -509,6 +517,7 @@ class AbstractMMD(ERM):
             self.kernel_type = "gaussian"
         else:
             self.kernel_type = "mean_cov"
+        self.target_envs = hparams["target_envs"]
 
     def my_cdist(self, x1, x2):
         x1_norm = x1.pow(2).sum(dim=-1, keepdim=True)
@@ -557,7 +566,8 @@ class AbstractMMD(ERM):
         targets = [yi for _, yi in minibatches]
 
         for i in range(nmb):
-            objective += F.cross_entropy(classifs[i], targets[i])
+            if not i in self.target_envs:
+                objective += F.cross_entropy(classifs[i], targets[i])
             for j in range(i + 1, nmb):
                 penalty += self.mmd(features[i], features[j])
 

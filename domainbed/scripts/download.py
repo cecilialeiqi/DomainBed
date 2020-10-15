@@ -1,6 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 
-from torchvision.datasets import MNIST
+from torchvision.datasets import MNIST, CIFAR10
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile
 import argparse
@@ -106,6 +106,13 @@ def download_mnist(data_dir):
     full_path = stage_path(data_dir, "MNIST")
     MNIST(full_path, download=True)
 
+
+
+# CIFAR #######################################################################
+
+def download_cifar(data_dir):
+    full_path = stage_path(data_dir, "CIFAR")
+    CIFAR10(full_path, download=True)
 
 # PACS ########################################################################
 
@@ -246,6 +253,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     download_mnist(args.data_dir)
+    download_cifar(args.data_dir)
     download_pacs(args.data_dir)
     download_office_home(args.data_dir)
     download_domain_net(args.data_dir)

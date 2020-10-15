@@ -40,6 +40,9 @@ if __name__ == "__main__":
     parser.add_argument('--checkpoint_freq', type=int, default=None,
         help='Checkpoint every N steps. Default is dataset-dependent.')
     parser.add_argument('--test_envs', type=int, nargs='+', default=[0])
+    # test is the one part without only evaluations
+    parser.add_argument('--target_envs', type=int, nargs='+', default=[])
+    # target is the part with only images but no labels
     parser.add_argument('--output_dir', type=str, default="train_output")
     parser.add_argument('--holdout_fraction', type=float, default=0.2)
     parser.add_argument('--skip_model_save', action='store_true')
@@ -100,37 +103,65 @@ if __name__ == "__main__":
     # each in-split except the test envs, and evaluate on all splits.
     in_splits = []
     out_splits = []
+    
+    train_loaders = []
+
+   
+    # Among the multiple environments, there is one test_evironment that is not used in training, by default it is 0..
+    eval_loaders = [] 
+    eval_weights = [] # [None for _, weights in (in_splits + out_splits)]
+    eval_loader_names = []
+
+    #['env{}_in'.format(i)
+    #    for i in range(len(in_splits))]
+    #eval_loader_names += ['env{}_out'.format(i)
+    #    for i in range(len(out_splits))]
+
+
+
+    target_envs=[]
     for env_i, env in enumerate(dataset):
-        out, in_ = misc.split_dataset(env,
-            int(len(env)*args.holdout_fraction),
-            misc.seed_hash(args.trial_seed, env_i))
-        if hparams['class_balanced']:
-            in_weights = misc.make_weights_for_balanced_classes(in_)
-            out_weights = misc.make_weights_for_balanced_classes(out)
+        if env_i not in args.test_envs:
+            out, in_ = misc.split_dataset(env,
+                int(len(env)*args.holdout_fraction),
+                misc.seed_hash(args.trial_seed, env_i))
+            if hparams['class_balanced']:
+                in_weights = misc.make_weights_for_balanced_classes(in_)
+                out_weights = misc.make_weights_for_balanced_classes(out)
+            else:
+                in_weights, out_weights = None, None
+            if env_i in args.target_envs:
+                target_envs.append(len(in_splits))
+            in_splits.append((in_, in_weights))
+            out_splits.append((out, out_weights))
+            train_loaders.append(InfiniteDataLoader(
+                            dataset=in_,
+                            weights=in_weights,
+                            batch_size=hparams['batch_size'],
+                            num_workers=dataset.N_WORKERS))
+            #for i, (env, env_weights) in enumerate(in_splits)
+            #if i not in args.test_envs]
+            eval_loaders += [FastDataLoader(
+                            dataset=in_,
+                            batch_size=64,
+                            num_workers=dataset.N_WORKERS),
+                       FastDataLoader(
+                            dataset=out,
+                            batch_size=64,
+                            num_workers=dataset.N_WORKERS) ]
+            eval_loader_names+=['source_tr{0}'.format(len(in_splits)),
+                                    'source_te{0}'.format(len(in_splits))]
+            eval_weights+=[None,None]
         else:
-            in_weights, out_weights = None, None
-        in_splits.append((in_, in_weights))
-        out_splits.append((out, out_weights))
-
-    train_loaders = [InfiniteDataLoader(
-        dataset=env,
-        weights=env_weights,
-        batch_size=hparams['batch_size'],
-        num_workers=dataset.N_WORKERS)
-        for i, (env, env_weights) in enumerate(in_splits)
-        if i not in args.test_envs]
-
-    eval_loaders = [FastDataLoader(
-        dataset=env,
-        batch_size=64,
-        num_workers=dataset.N_WORKERS)
-        for env, _ in (in_splits + out_splits)]
-    eval_weights = [None for _, weights in (in_splits + out_splits)]
-    eval_loader_names = ['env{}_in'.format(i)
-        for i in range(len(in_splits))]
-    eval_loader_names += ['env{}_out'.format(i)
-        for i in range(len(out_splits))]
-
+            out_splits.append((env, None))
+            eval_loaders.append(FastDataLoader(
+                            dataset=env,
+                            batch_size=64,
+                            num_workers=dataset.N_WORKERS))
+            eval_loader_names.append('target')
+            eval_weights.append(None)
+    hparams["target_envs"] = target_envs
+    #args.target_envs = target_envs
     algorithm_class = algorithms.get_algorithm_class(args.algorithm)
     algorithm = algorithm_class(dataset.input_shape, dataset.num_classes,
         len(dataset) - len(args.test_envs), hparams)
@@ -164,10 +195,11 @@ if __name__ == "__main__":
                 'step': step,
                 'epoch': step / steps_per_epoch,
             }
-
+            if results['epoch'] > 15 and results['epoch']<16:
+                hparams["lr"] = 1e-3
+                algorithm.update_hparams(hparams)
             for key, val in checkpoint_vals.items():
                 results[key] = np.mean(val)
-
             evals = zip(eval_loader_names, eval_loaders, eval_weights)
             for name, loader, weights in evals:
                 acc = misc.accuracy(algorithm, loader, weights, device)
